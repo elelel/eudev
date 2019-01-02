@@ -38,8 +38,23 @@
 static int verbose;
 static int dry_run;
 
+// In exec_list, after batch of which size make a pause
+static int pause_batch_size = 10;
+// In exec_list, how many msecs to wait after each batch
+static int pause_batch_msec = 0;
+// In exec_list, how many msecs to wait after each device
+static int pause_dev_msec = 0;
+
 static void exec_list(struct udev_enumerate *udev_enumerate, const char *action) {
         struct udev_list_entry *entry;
+	int i = 0;
+	struct timespec ts_rslt;
+	struct timespec ts_batch;
+	ts_batch.tv_sec = pause_batch_msec / 1000;
+	ts_batch.tv_nsec = (pause_batch_msec % 1000) * 1000000L;
+	struct timespec ts_dev;
+	ts_dev.tv_sec = pause_dev_msec / 1000;
+	ts_dev.tv_nsec = (pause_dev_msec % 1000) * 1000000L;
 
         udev_list_entry_foreach(entry, udev_enumerate_get_list_entry(udev_enumerate)) {
                 char filename[UTIL_PATH_SIZE];
@@ -50,12 +65,48 @@ static void exec_list(struct udev_enumerate *udev_enumerate, const char *action)
                 if (dry_run)
                         continue;
                 strscpyl(filename, sizeof(filename), udev_list_entry_get_name(entry), "/uevent", NULL);
-                fd = open(filename, O_WRONLY|O_CLOEXEC);
-                if (fd < 0)
-                        continue;
-                if (write(fd, action, strlen(action)) < 0)
-                        log_debug_errno(errno, "error writing '%s' to '%s': %m", action, filename);
-                close(fd);
+
+		if ((strstr(filename, "/sys/devices/152e0000.mfc0/video4linux/video6/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/152e0000.mfc0/video4linux/video7/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/152e0000.mfc0/video4linux/video8/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video130/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video131/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video132/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video140/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video141/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video142/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video150/uevent") == NULL) &&
+		    (strstr(filename, "/sys/devices/14370000.fimc_is/video4linux/video152/uevent") == NULL)
+		    ) {
+		  if (verbose)
+		    printf("Executing action %s to %s\n", action, filename);
+		  if (strstr(filename, "video4linux") != NULL) {
+		    struct timespec ts;
+		    struct timespec ts_rslt;
+		    ts.tv_sec = 0;
+		    ts.tv_nsec = 300 * 1000000L;
+		    nanosleep(&ts, &ts_rslt);
+		  }
+		  fflush(stdout);
+		  if (pause_dev_msec != 0) {
+		    nanosleep(&ts_dev, &ts_rslt);
+		  }
+		  fd = open(filename, O_WRONLY|O_CLOEXEC);
+		  if (fd < 0)
+		    continue;
+		  if (write(fd, action, strlen(action)) < 0)
+		    log_debug_errno(errno, "error writing '%s' to '%s': %m", action, filename);
+		  close(fd);
+		} else {
+		  if (verbose)
+		    printf("Not executing action %s to %s\n", action, filename);
+		  fflush(stdout);
+		}
+
+		if ((pause_batch_msec != 0) && (i % pause_batch_size == 0)) {
+		  nanosleep(&ts_batch, &ts_rslt);
+		}
+		++i;
         }
 }
 
@@ -115,6 +166,9 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
                 { "name-match",        required_argument, NULL, ARG_NAME },
                 { "parent-match",      required_argument, NULL, 'b'      },
                 { "help",              no_argument,       NULL, 'h'      },
+                { "pause-batch-size",  required_argument, NULL, 'z'      },
+                { "pause-batch-time",  required_argument, NULL, 'k'      },
+                { "pause-dev-time",    required_argument, NULL, 'l'      },
                 {}
         };
         enum {
@@ -129,12 +183,21 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
         if (udev_enumerate == NULL)
                 return 1;
 
-        while ((c = getopt_long(argc, argv, "vno:t:c:s:S:a:A:p:g:y:b:h", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "vno:t:c:s:S:a:A:p:g:y:b:h:z:k:l", options, NULL)) >= 0) {
                 const char *key;
                 const char *val;
                 char buf[UTIL_PATH_SIZE];
 
                 switch (c) {
+		case 'z':
+		  sscanf(optarg, "%d", &pause_batch_size);
+		  break;
+		case 'k':
+		  sscanf(optarg, "%d", &pause_batch_msec);
+		  break;
+		case 'l':
+		  sscanf(optarg, "%d", &pause_dev_msec);
+		  break;
                 case 'v':
                         verbose = 1;
                         break;
